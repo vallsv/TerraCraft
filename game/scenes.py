@@ -506,8 +506,48 @@ class GameScene(Scene):
                     sector = x + dx, y + dy, z + dz
                     if self.is_sector_in_screen(sector):
                         sectors_to_show.append(sector)
+
+        print(len(sectors_to_show))
         self.model.show_only_sectors(sectors_to_show)
 
+    def draw_test(self):
+        if self.sector is None:
+            return
+
+        del self._m
+        label = pyglet.text.Label(
+            '', font_name='Arial',
+            font_size=12,
+            x=0, y=0, anchor_x='right',  anchor_y='top',
+            color=(0, 0, 0, 255))
+
+        i = 0
+        for sector in []: #self.model.shown_sectors:
+            label.text = '. %d,%d,%d' % sector
+            point = numpy.array(sector) * utilities.SECTOR_SIZE + utilities.SECTOR_SIZE * 0.5
+            debug = sector == (3,0,3)
+            pos = self.to_screen(point, debug=debug)
+
+            if pos is None:
+                i += 1
+                continue
+            if sector == (3, 0, 3):
+                label.font_size=20
+            else:
+                label.font_size=12
+            label.x = pos[0]
+            label.y = pos[1]
+            label.draw()
+
+        label.text = 'o'
+        for p in self.IDENTITY_CUBE:
+            p = (p + numpy.array((3,0,3))) * utilities.SECTOR_SIZE
+            pos = self.to_screen(p)
+            if pos is None:
+                continue
+            label.x = pos[0]
+            label.y = pos[1]
+            label.draw()
 
     IDENTITY_CUBE = numpy.array([
         [1.0, 1.0, 1.0],
@@ -792,6 +832,8 @@ class GameScene(Scene):
             pyglet.clock.get_fps(), x, y, z,
             self.model.currently_shown, len(self.model.world))
         self.info_label.draw()
+
+        self.draw_test()
 
 
 class Model(object):
