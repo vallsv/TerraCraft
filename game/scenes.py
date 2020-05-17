@@ -48,6 +48,10 @@ from .utilities import *
 from .graphics import BlockGroup
 from .genworld import WorldGenerator
 from game import utilities
+import numpy
+from transforms3d.axangles import axangle2mat
+from transforms3d.affines import compose
+
 
 class AudioEngine:
     """A high level audio engine for easily playing SFX and Music."""
@@ -486,24 +490,109 @@ class GameScene(Scene):
         A sector is a contiguous x, y sub-region of world. Sectors are
         used to speed up world rendering.
         """
-        sector = utilities.sectorize(position)
-        if self.sector == sector:
-            # The following computation is based on the actual sector
-            # So if there is no changes on the sector, it have to display
-            # The exact same thing
-            return
+        current_sector = utilities.sectorize(position)
 
         sectors_to_show = []
         pad = 4
+        dist = (pad + 1) ** 2
         for dx in range(-pad, pad + 1):
             for dy in [0]:  # range(-pad, pad + 1):
                 for dz in range(-pad, pad + 1):
-                    if dx ** 2 + dy ** 2 + dz ** 2 > (pad + 1) ** 2:
+                    if dx ** 2 + dy ** 2 + dz ** 2 > dist:
                         # Skip sectors outside of the sphere of radius pad+1
                         continue
-                    x, y, z = sector
-                    sectors_to_show.append((x + dx, y + dy, z + dz))
+
+                    x, y, z = current_sector
+                    sector = x + dx, y + dy, z + dz
+                    if self.is_sector_in_screen(sector):
+                        sectors_to_show.append(sector)
         self.model.show_only_sectors(sectors_to_show)
+
+
+    IDENTITY_CUBE = numpy.array([
+        [1.0, 1.0, 1.0],
+        [1.0, 1.0, 0.0],
+        [1.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 1.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 0.0],
+    ])
+
+    def is_point_in_screen(self, point):
+        x, y, z = self.to_screen(point, normal=True)
+        inside = z > 0 and abs(x) <= 1 and abs(y) <= 1
+        return inside
+
+    def is_sector_in_screen(self, sector):
+        points = (self.IDENTITY_CUBE + numpy.array(sector)) * utilities.SECTOR_SIZE
+        for i in range(8):
+            points[i] = self.to_screen(points[i], normal=True)
+
+        if sector == (3, 0, 3):
+            print(sector)
+            print(points)
+
+        if numpy.alltrue(points[:,2] < 1):
+            # Everything on the back
+            if sector == (3, 0, 3):
+                print("BACK")
+            return False
+        # outside of -1..1 means outside the screen
+        if numpy.alltrue(points[:,0] < -1):
+            return False
+        if numpy.alltrue(points[:,0] > 1):
+            return False
+        if numpy.alltrue(points[:,1] < -1):
+            return False
+        if numpy.alltrue(points[:,1] > 1):
+            return False
+        if sector == (3, 0, 3):
+            print("OK")
+        return True
+
+    def to_screen(self, point, normal=False, debug=False):
+        if not hasattr(self, "_m"):
+            width, height = self.window.get_framebuffer_size()
+            fovy, aspect, znear, zfar = numpy.deg2rad(65.0), width / float(height), 1, 60.0
+            f = 1 / numpy.tan(fovy * 0.5)
+            zdiff = znear - zfar
+            projection = numpy.array([
+                [f/aspect, 0, 0, 0],
+                [0, f, 0, 0],
+                [0, 0, (zfar + znear) / zdiff, 2 * zfar * znear / zdiff],
+                [0, 0, -1, 0]
+                ])
+            #projection = projection.T  # hmmm
+            rx, ry = self.rotation
+            px, py, pz = self.position
+            rx_rad = numpy.deg2rad(rx)
+            ry_rad = numpy.deg2rad(ry)
+            r1_3 = axangle2mat((0, 1, 0), rx_rad, is_normalized=True)
+            r2_3 = axangle2mat((numpy.cos(rx_rad), 0, numpy.sin(rx_rad)), -ry_rad, is_normalized=True)
+            #r = compose(numpy.zeros(3), r1_3 @ r2_3, numpy.ones(3))
+            r = compose(numpy.zeros(3), r1_3 @ r2_3, numpy.ones(3))
+            #r = r.T
+            t = compose((-px, -py, -pz), numpy.eye(3), numpy.ones(3))
+            modelview = r @ t
+            #modelview = modelview.T  # hmmm
+            self._m = projection @ modelview
+        elif not normal:
+            width, height = self.window.get_framebuffer_size()
+
+        pos = numpy.array([point[0], point[1], point[2], 1])
+        pos = self._m @ pos
+        #if debug:
+        #    print(pos)
+        # pos[0:3] /= pos[3]
+        pos[0:2] /= pos[2]
+        if normal:
+            return pos[0:3]
+        else:
+            if pos[2] < 0:
+                return None
+            return (pos[0:2] + 1) * numpy.array([width, height]) * 0.5
 
     def on_mouse_press(self, x, y, button, modifiers):
         """Event handler for the Window.on_mouse_press event.
