@@ -885,6 +885,7 @@ class Model(object):
             Whether or not to draw the block immediately.
 
         """
+        immediate = True
         if position in self.world:
             self.remove_block(position, immediate)
         self.world[position] = block
@@ -943,6 +944,7 @@ class Model(object):
             Whether or not to show the block immediately.
 
         """
+        immediate = True
         block = self.world[position]
         self.shown[position] = block
         if immediate:
@@ -981,6 +983,7 @@ class Model(object):
             Whether or not to immediately remove the block from the canvas.
 
         """
+        immediate = True
         self.shown.pop(position)
         if immediate:
             self._hide_block(position)
@@ -991,7 +994,9 @@ class Model(object):
         """ Private implementation of the 'hide_block()` method.
 
         """
-        self._shown.pop(position).delete()
+        # test it again, it can still be in the enqueue
+        if position in self._shown:
+            self._shown.pop(position).delete()
 
     def show_sector(self, sector):
         """ Ensure all blocks in the given sector that should be shown are
