@@ -32,7 +32,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 
-def _tex_coord(x, y, n=4):
+def _tex_coord(x, y, n=8):
     """ Return the bounding vertices of the texture square.
 
     """
