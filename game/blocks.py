@@ -83,6 +83,11 @@ WOODEN_PLANKS = Block('wooden_planks', _tex_coords((2, 0), (2, 0), (2, 0)))
 CLOUD = Block('cloud', _tex_coords((1, 0), (1, 0), (1, 0)))
 DIRT_WITH_SNOW = Block('dirt_with_snow', _tex_coords((1, 0), (0, 2), (0, 0)))
 WATER = Block('water', _tex_coords((3, 1), (3, 1), (3, 1)))
+STONE = Block('stone', _tex_coords((0, 4), (0, 4), (0, 4)))
+STONE_WITH_SNOW = Block('stone_with_snow', _tex_coords((1, 0), (0, 4), (0, 5)))
+COAL_ORE = Block('coal_ore', _tex_coords((1, 4), (1, 4), (1, 4)))
+IRON_ORE = Block('iron_ore', _tex_coords((2, 4), (2, 4), (2, 4)))
+GOLD_ORE = Block('gold_ore', _tex_coords((3, 4), (3, 4), (3, 4)))
 
 # A reference to the 6 faces (sides) of the blocks:
 FACES = [(0, 1, 0), (0, -1, 0), (-1, 0, 0), (1, 0, 0), (0, 0, 1), (0, 0, -1)]
