@@ -418,7 +418,7 @@ class GameScene(Scene):
         self.received_sectors.append(chunk)
         # Reduce the load of the main thread by delaying the
         # computation between 2 chunks
-        time.sleep(0.1)
+        time.sleep(0.05)
 
     def _update(self, dt):
         """ Private implementation of the `update()` method. This is where most
@@ -514,13 +514,13 @@ class GameScene(Scene):
             return
 
         sectors_to_show = []
-        pad = 4
+        pad = 5
         for dx in range(-pad, pad + 1):
-            for dy in [0]:  # range(-pad, pad + 1):
+            for dy in range(-pad, pad + 1):
                 for dz in range(-pad, pad + 1):
                     # Manathan distance
-                    dist = abs(dx) + abs(dz)
-                    if dist > pad + 2:
+                    dist = abs(dx) + abs(dy) + abs(dz)
+                    if dist > pad + pad // 2:
                         # Skip sectors outside of the sphere of radius pad+1
                         continue
                     x, y, z = sector

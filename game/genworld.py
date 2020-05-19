@@ -44,16 +44,41 @@ noise = perlin.SimplexNoise()
 
 
 class Chunk:
-    """A chunk of the world, with some helpers"""
+    """A chunk of the world
+
+    It contains the block description of a sector. As it is initially generated.
+    """
 
     def __init__(self, sector):
         self.blocks = {}
+        """Location and kind of the blocks in this sector."""
 
         self.sector = sector
-        assert sector[1] == 0
-        """For now a chunk is infinite vertically"""
+        """Location of this sector."""
+
+        self.min_block = [i * SECTOR_SIZE for i in sector]
+        """Minimum location (included) of block in this section."""
+
+        self.max_block = [(i + 1) * SECTOR_SIZE for i in sector]
+        """Maximum location (excluded) of block in this section."""
+
+    def contains(self, pos):
+        """True if the position `pos` is inside this sector."""
+        return (self.min_block[0] <= pos[0] < self.max_block[0]
+                and self.min_block[1] <= pos[1] < self.max_block[1]
+                and self.min_block[2] <= pos[2] < self.max_block[2])
+
+    def contains_y(self, y):
+        """True if the horizontal plan `y` is inside this sector."""
+        return self.min_block[1] <= y < self.max_block[1]
+
+    def contains_y_range(self, ymin, ymax):
+        """True if the horizontal plan between `ymin` and `ymax` is inside this
+        sector."""
+        return self.min_block[1] <= ymax and ymin <= self.max_block[1]
 
     def empty(self, pos):
+        """Return false if there is no block at this position in this chunk"""
         return pos not in self.blocks
 
     def __setitem__(self, pos, value):
@@ -61,6 +86,11 @@ class Chunk:
 
     def __getitem__(self, pos):
         return self.blocks[pos]
+
+    def add_block(self, pos, block):
+        """Add a block to this chunk only if the `pos` is part of this chunk."""
+        if self.contains(pos):
+            self.blocks[pos] = block
 
 
 class WorldGenerator:
@@ -86,6 +116,9 @@ class WorldGenerator:
         self.cloudiness = 0.35
         """The cloudiness can be custom to change the about of clouds generated.
         0 means blue sky, and 1 means white sky."""
+
+        self.y_cloud = 20
+        """y-position of the clouds."""
 
         self.nb_trees = 3
         """Max number of trees to generate per sectors"""
@@ -160,11 +193,12 @@ class WorldGenerator:
         future = self.executor.submit(self.generate, sector)
         future.add_done_callback(send_result)
 
-    def _iter_xz(self, sector):
-        """Iter all the xz block position from a sector"""
-        sx, _sy, sz = sector
-        for x in range(sx * SECTOR_SIZE, (sx + 1) * SECTOR_SIZE):
-            for z in range(sz * SECTOR_SIZE, (sz + 1) * SECTOR_SIZE):
+    def _iter_xz(self, chunk):
+        """Iterate all the xz block positions from a sector"""
+        xmin, _, zmin = chunk.min_block
+        xmax, _, zmax = chunk.max_block
+        for x in range(xmin, xmax):
+            for z in range(zmin, zmax):
                 yield x, z
 
     def generate(self, sector):
@@ -191,47 +225,63 @@ class WorldGenerator:
         """
         y_pos = self.y - 2
         height = self.enclosure_height
+        if not chunk.contains_y_range(y_pos, y_pos + height):
+            # Early break, there is no enclosure here
+            return
+
+        y_pos = self.y - 2
         half_size = self.enclosure_size
         n = half_size
-        for x, z in self._iter_xz(chunk.sector):
+        for x, z in self._iter_xz(chunk):
             if x < -n or x > n or z < -n or z > n:
                 continue
             # create a layer stone an DIRT_WITH_GRASS everywhere.
-            chunk[(x, y_pos, z)] = BEDSTONE
+            pos = (x, y_pos, z)
+            chunk.add_block(pos, BEDSTONE)
 
             if self.enclosure:
                 # create outer walls.
                 # Setting values for the Bedrock (depth, and height of the perimeter wall).
                 if x in (-n, n) or z in (-n, n):
                     for dy in range(height):
-                        chunk[(x, y_pos + dy, z)] = BEDSTONE
+                        pos = (x, y_pos + dy, z)
+                        chunk.add_block(pos, BEDSTONE)
 
     def _generate_floor(self, chunk):
         """Generate a standard floor at a specific height"""
         y_pos = self.y - 2
+        if not chunk.contains_y(y_pos):
+            # Early break, there is no clouds here
+            return
         n = self.enclosure_size
-        for x, z in self._iter_xz(chunk.sector):
+        for x, z in self._iter_xz(chunk):
             if self.enclosure:
-                if x <= -n or x >= n - 1 or z <= -n or z >= n - 1:
+                if x <= -n or x >= n or z <= -n or z >= n:
                     continue
-            chunk[(x, y_pos, z)] = DIRT_WITH_GRASS
+            chunk.add_block((x, y_pos, z), DIRT_WITH_GRASS)
+
+    def _get_biome(self, x, z):
+        freq = 38
+        c = noise.noise2(x / freq, z / freq)
+        c = int((c + 1) * 0.5 * len(self.lookup_terrain))
+        if c < 0:
+            c = 0
+        nb_block, terrains = self.lookup_terrain[c]
+        return nb_block, terrains
 
     def _generate_random_map(self, chunk):
         n = self.enclosure_size
         y_pos = self.y - 2
-        freq = 38
-        for x, z in self._iter_xz(chunk.sector):
+        if not chunk.contains_y_range(y_pos, y_pos + 20):
+            return
+        for x, z in self._iter_xz(chunk):
             if self.enclosure:
-                if x <= -n or x >= n - 1 or z <= -n or z >= n - 1:
+                if x <= -n or x >= n or z <= -n or z >= n:
                     continue
-            c = noise.noise2(x / freq, z / freq)
-            c = int((c + 1) * 0.5 * len(self.lookup_terrain))
-            if c < 0:
-                c = 0
-            nb_block, terrains = self.lookup_terrain[c]
+            nb_block, terrains = self._get_biome(x, z)
             for i in range(nb_block):
                 block = terrains[-1-i] if i < len(terrains) else terrains[0]
-                chunk[(x, y_pos + nb_block - i, z)] = block
+                chunk.add_block((x, y_pos + nb_block - i, z), block)
 
     def _generate_trees(self, chunk):
         """Generate trees in the map
@@ -239,13 +289,14 @@ class WorldGenerator:
         For now it do not generate trees between 2 sectors, and use rand
         instead of a procedural generation.
         """
+        if not chunk.contains_y_range(0, 15):
+            return
 
-        def get_biome(chunk, x, y, z):
+        def get_biome(x, y, z):
             """Return the biome at a location of the map plus the first empty place."""
-            # This loop could be removed using procedural height map
-            while not chunk.empty((x, y, z)):
-                y = y + 1
-            block = chunk[x, y - 1, z]
+            nb_block, terrains = self._get_biome(x, z)
+            y = self.y - 2 + nb_block
+            block = terrains[-1]
             return block, y
 
         sector = chunk.sector
@@ -261,7 +312,7 @@ class WorldGenerator:
                 if x < -n + 2 or x > n - 2 or z < -n + 2 or z > n - 2:
                     continue
 
-            biome, start_pos = get_biome(chunk, x, y_pos + 1, z)
+            biome, start_pos = get_biome(x, y_pos + 1, z)
             if biome not in [DIRT, DIRT_WITH_GRASS, SAND]:
                 continue
             if biome == SAND:
@@ -275,16 +326,16 @@ class WorldGenerator:
                 self._create_default_tree(chunk, x, start_pos, z, height)
 
     def _create_plus(self, chunk, x, y, z, block):
-        chunk[(x, y, z)] = block
-        chunk[(x - 1, y, z)] = block
-        chunk[(x + 1, y, z)] = block
-        chunk[(x, y, z - 1)] = block
-        chunk[(x, y, z + 1)] = block
+        chunk.add_block((x, y, z), block)
+        chunk.add_block((x - 1, y, z), block)
+        chunk.add_block((x + 1, y, z), block)
+        chunk.add_block((x, y, z - 1), block)
+        chunk.add_block((x, y, z + 1), block)
 
     def _create_box(self, chunk, x, y, z, block):
         for i in range(9):
             dx, dz = i // 3 - 1, i % 3 - 1
-            chunk[(x + dx, y, z + dz)] = block
+            chunk.add_block((x + dx, y, z + dz), block)
 
     def _create_default_tree(self, chunk, x, y, z, height):
         if height == 0:
@@ -293,13 +344,13 @@ class WorldGenerator:
             self._create_plus(x, y, z, LEAVES)
             return
         if height == 2:
-            chunk[(x, y, z)] = TREE
-            chunk[(x, y + 1, z)] = LEAVES
+            chunk.add_block((x, y, z), TREE)
+            chunk.add_block((x, y + 1, z), LEAVES)
             return
         y_tree = 0
         root_height = 2 if height >= 4 else 1
         for _ in range(root_height):
-            chunk[(x, y + y_tree, z)] = TREE
+            chunk.add_block((x, y + y_tree, z), TREE)
             y_tree += 1
         self._create_plus(chunk, x, y + y_tree, z, LEAVES)
         y_tree += 1
@@ -315,52 +366,57 @@ class WorldGenerator:
             self._create_plus(chunk, x, y, z, LEAVES)
             return
         if height == 2:
-            chunk[(x, y, z)] = TREE
-            chunk[(x, y + 1, z)] = LEAVES
+            chunk.add_block((x, y, z), TREE)
+            chunk.add_block((x, y + 1, z), LEAVES)
             return
         y_tree = 0
-        chunk[(x, y + y_tree, z)] = TREE
+        chunk.add_block((x, y + y_tree, z), TREE)
         y_tree += 1
         self._create_box(chunk, x, y + y_tree, z, LEAVES)
-        chunk[(x, y + y_tree, z)] = TREE
+        chunk.add_block((x, y + y_tree, z), TREE)
         y_tree += 1
         h_layer = (height - 2) // 2
         for _ in range(h_layer):
             self._create_plus(chunk, x, y + y_tree, z, LEAVES)
-            chunk[(x, y + y_tree, z)] = TREE
+            chunk.add_block((x, y + y_tree, z), TREE)
             y_tree += 1
         for _ in range(h_layer):
-            chunk[(x, y + y_tree, z)] = LEAVES
+            chunk.add_block((x, y + y_tree, z), LEAVES)
             y_tree += 1
 
     def _create_coconut_tree(self, chunk, x, y, z, height):
         y_tree = 0
         for _ in range(height - 1):
-            chunk[(x, y + y_tree, z)] = TREE
+            chunk.add_block((x, y + y_tree, z), TREE)
             y_tree += 1
-        chunk[(x + 1, y + y_tree, z)] = LEAVES
-        chunk[(x - 1, y + y_tree, z)] = LEAVES
-        chunk[(x, y + y_tree, z + 1)] = LEAVES
-        chunk[(x, y + y_tree, z - 1)] = LEAVES
+        chunk.add_block((x + 1, y + y_tree, z), LEAVES)
+        chunk.add_block((x - 1, y + y_tree, z), LEAVES)
+        chunk.add_block((x, y + y_tree, z + 1), LEAVES)
+        chunk.add_block((x, y + y_tree, z - 1), LEAVES)
         if height >= 5:
-            chunk[(x + 2, y + y_tree, z)] = LEAVES
-            chunk[(x - 2, y + y_tree, z)] = LEAVES
-            chunk[(x, y + y_tree, z + 2)] = LEAVES
-            chunk[(x, y + y_tree, z - 2)] = LEAVES
+            chunk.add_block((x + 2, y + y_tree, z), LEAVES)
+            chunk.add_block((x - 2, y + y_tree, z), LEAVES)
+            chunk.add_block((x, y + y_tree, z + 2), LEAVES)
+            chunk.add_block((x, y + y_tree, z - 2), LEAVES)
         if height >= 6:
             y_tree -= 1
-            chunk[(x + 3, y + y_tree, z)] = LEAVES
-            chunk[(x - 3, y + y_tree, z)] = LEAVES
-            chunk[(x, y + y_tree, z + 3)] = LEAVES
-            chunk[(x, y + y_tree, z - 3)] = LEAVES
+            chunk.add_block((x + 3, y + y_tree, z), LEAVES)
+            chunk.add_block((x - 3, y + y_tree, z), LEAVES)
+            chunk.add_block((x, y + y_tree, z + 3), LEAVES)
+            chunk.add_block((x, y + y_tree, z - 3), LEAVES)
 
     def _generate_clouds(self, chunk):
-        """Generate clouds at this `height` and covering this `half_size`
-        centered to 0.
+        """Generate clouds at this `self.y_cloud`.
         """
-        y_pos = self.y + 20
+        y_pos = self.y_cloud
+        if not chunk.contains_y(y_pos):
+            # Early break, there is no clouds here
+            return
         freq = 20
-        for x, z in self._iter_xz(chunk.sector):
+        for x, z in self._iter_xz(chunk):
+            pos = (x, y_pos, z)
+            if not chunk.empty(pos):
+                continue
             c = noise.noise2(x / freq, z / freq)
             if (c + 1) * 0.5 < self.cloudiness:
-                chunk[(x, y_pos, z)] = CLOUD
+                chunk[pos] = CLOUD
