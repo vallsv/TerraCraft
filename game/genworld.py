@@ -37,10 +37,7 @@ import random
 from .blocks import *
 from .utilities import *
 from game import utilities
-from libs import perlin
-
-
-noise = perlin.SimplexNoise()
+from .noise import Noise
 
 
 class Chunk:
@@ -132,6 +129,15 @@ class WorldGenerator:
 
         self.enclosure_height = 12
         """Enclosure height, if generated"""
+
+        self.terrain_gen = Noise(frequency=1 / (38 * 256), octaves=4)
+        """Raw generator used to create the terrain"""
+
+        self.cloud_gen = Noise(frequency=1 / (20 * 256), octaves=3)
+        """Raw generator used to create the clouds"""
+
+        self.terrain_gen.randomize()
+        self.cloud_gen.randomize()
 
         self.lookup_terrain = []
 
@@ -261,8 +267,7 @@ class WorldGenerator:
             chunk.add_block((x, y_pos, z), DIRT_WITH_GRASS)
 
     def _get_biome(self, x, z):
-        freq = 38
-        c = noise.noise2(x / freq, z / freq)
+        c = self.terrain_gen.noise2(x, z)
         c = int((c + 1) * 0.5 * len(self.lookup_terrain))
         if c < 0:
             c = 0
@@ -412,11 +417,10 @@ class WorldGenerator:
         if not chunk.contains_y(y_pos):
             # Early break, there is no clouds here
             return
-        freq = 20
         for x, z in self._iter_xz(chunk):
             pos = (x, y_pos, z)
             if not chunk.empty(pos):
                 continue
-            c = noise.noise2(x / freq, z / freq)
+            c = self.cloud_gen.noise2(x, z)
             if (c + 1) * 0.5 < self.cloudiness:
                 chunk[pos] = CLOUD
