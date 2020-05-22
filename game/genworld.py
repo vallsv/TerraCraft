@@ -136,6 +136,11 @@ class WorldGenerator:
         self.cloud_gen = Noise(frequency=1 / (20 * 256), octaves=3)
         """Raw generator used to create the clouds"""
 
+        self.gold_gen = Noise(frequency=1 / (64 * 256), octaves=2, persistence=0.1)
+        self.iron_gen = Noise(frequency=1 / (32 * 256), octaves=2, persistence=0.1)
+        self.coal_gen = Noise(frequency=1 / (16 * 256), octaves=2, persistence=0.1)
+        """Raw generator for ore"""
+
         self.terrain_gen.randomize()
         self.cloud_gen.randomize()
 
@@ -207,13 +212,23 @@ class WorldGenerator:
             for z in range(zmin, zmax):
                 yield x, z
 
+    def _iter_xyz(self, chunk):
+        """Iterate all the xyz block positions from a sector"""
+        xmin, ymin, zmin = chunk.min_block
+        xmax, ymax, zmax = chunk.max_block
+        for x in range(xmin, xmax):
+            for y in range(ymin, ymax):
+                for z in range(zmin, zmax):
+                    yield x, y, z
+
     def generate(self, sector):
         """Generate a specific sector of the world and place all the blocks"""
 
         chunk = Chunk(sector)
         """Store the content of this sector"""
 
-        self._generate_enclosure(chunk)
+        if self.enclosure:
+            self._generate_enclosure(chunk)
         if self.hills_enabled:
             self._generate_random_map(chunk)
         else:
@@ -222,6 +237,8 @@ class WorldGenerator:
             self._generate_clouds(chunk)
         if self.nb_trees > 0:
             self._generate_trees(chunk)
+        if not self.enclosure:
+            self._generate_underworld(chunk)
 
         return chunk
 
@@ -245,13 +262,12 @@ class WorldGenerator:
             pos = (x, y_pos, z)
             chunk.add_block(pos, BEDSTONE)
 
-            if self.enclosure:
-                # create outer walls.
-                # Setting values for the Bedrock (depth, and height of the perimeter wall).
-                if x in (-n, n) or z in (-n, n):
-                    for dy in range(height):
-                        pos = (x, y_pos + dy, z)
-                        chunk.add_block(pos, BEDSTONE)
+            # create outer walls.
+            # Setting values for the Bedrock (depth, and height of the perimeter wall).
+            if x in (-n, n) or z in (-n, n):
+                for dy in range(height):
+                    pos = (x, y_pos + dy, z)
+                    chunk.add_block(pos, BEDSTONE)
 
     def _generate_floor(self, chunk):
         """Generate a standard floor at a specific height"""
@@ -424,3 +440,29 @@ class WorldGenerator:
             c = self.cloud_gen.noise2(x, z)
             if (c + 1) * 0.5 < self.cloudiness:
                 chunk[pos] = CLOUD
+
+    def _get_stone(self, pos):
+        """Returns the expected mineral at a specific location.
+
+        The input location have to be already known as a stone location.
+        """
+        v = self.gold_gen.noise3(*pos)
+        if 0.02 < v < 0.03:
+            return GOLD_ORE
+        v = self.iron_gen.noise3(*pos)
+        if 0.015 < v < 0.03:
+            return IRON_ORE
+        v = self.coal_gen.noise3(*pos)
+        if 0.01 < v < 0.03:
+            return COAL_ORE
+        return STONE
+
+    def _generate_underworld(self, chunk):
+        if chunk.min_block[1] > self.y - 3:
+            return
+        for x, y, z in self._iter_xyz(chunk):
+            if y > self.y - 2:
+                continue
+            pos = x, y, z
+            block = self._get_stone(pos)
+            chunk[pos] = block
