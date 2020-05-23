@@ -746,8 +746,8 @@ class GameScene(Scene):
         elements = []
         elements.append("FPS = [%02d]" % pyglet.clock.get_fps())
         elements.append("COORDS = [%.2f, %.2f, %.2f]" % (x, y, z))
-        elements.append("BLOCKS = %d / %d" % (self.model.currently_shown, self.model.count_blocks()))
         elements.append("SECTORS = %d [+%d]" % (len(self.model.sectors), len(self.model.requested)))
+        elements.append("BLOCKS = %d" % self.model.count_blocks())
         self.info_label.text = ' : '.join(elements)
         self.info_label.draw()
 
