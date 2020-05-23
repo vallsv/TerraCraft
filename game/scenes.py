@@ -348,6 +348,31 @@ class GameScene(Scene):
             dz = 0.0
         return dx, dy, dz
 
+    def init_player_on_summit(self):
+        """Make sure the sector containing the actor is loaded and the player is on top of it.
+        """
+        generator = self.model.generator
+        x, y, z = self.position
+        free_height = 0
+        limit = 100
+        while free_height < PLAYER_HEIGHT and limit:
+            pos = x , y, z
+            sector_position = sectorize(pos)
+            if sector_position not in self.model.sectors:
+                sector = generator.generate(sector_position)
+                self.model.register_sector(sector)
+            if self.model.empty(pos):
+                free_height += 1
+            else:
+                free_height = 0
+            y = y + 1
+            limit -= 1
+
+        position = x, y - PLAYER_HEIGHT + 1, z
+        if self.position != position:
+            self.position = position
+            self.frustum_updated = True
+
     def update(self, dt):
         """ This method is scheduled to be called repeatedly by the pyglet
         clock.
@@ -370,20 +395,7 @@ class GameScene(Scene):
                 generator = WorldGenerator()
                 generator.hills_enabled = HILLS_ON
                 self.model.generator = generator
-
-                # Make sure the sector containing the actor is loaded
-                sector_position = sectorize(self.position)
-                sector = generator.generate(sector_position)
-                self.model.register_sector(sector)
-
-                # Move the actor above the terrain
-                while not self.model.empty(self.position):
-                    x, y, z = self.position
-                    position = x, y + 1, z
-                    if self.position != position:
-                        self.position = position
-                        self.frustum_updated = True
-
+                self.init_player_on_summit()
 
             self.initialized = True
 
