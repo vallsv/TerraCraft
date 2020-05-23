@@ -44,9 +44,7 @@ from .world import Sector
 class WorldGenerator:
     """Generate a world model"""
 
-    def __init__(self, model):
-        self.model = model
-
+    def __init__(self):
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         """This thread pool will execute one task at a time. Others are stacked,
         waiting for execution."""

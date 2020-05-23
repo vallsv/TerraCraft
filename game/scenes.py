@@ -238,9 +238,6 @@ class GameScene(Scene):
         # Which sector the player is currently in.
         self.sector = None
 
-        self.received_sectors = []
-        # Channel for data received from the the world generator
-
         # True if the location of the camera have changed between an update
         self.frustum_updated = False
 
@@ -361,10 +358,6 @@ class GameScene(Scene):
             The change in time since the last call.
 
         """
-        if self.received_sectors:
-            chunk = self.received_sectors.pop(0)
-            self.model.feed_chunk(chunk)
-
         if not self.initialized:
             self.set_exclusive_mouse(True)
 
@@ -374,15 +367,14 @@ class GameScene(Scene):
                 has_save = self.scene_manager.save.load_world(self.model)
 
             if not has_save:
-                generator = WorldGenerator(self.model)
-                generator.set_callback(self.on_sector_received)
+                generator = WorldGenerator()
                 generator.hills_enabled = HILLS_ON
                 self.model.generator = generator
 
                 # Make sure the sector containing the actor is loaded
-                sector = sectorize(self.position)
-                chunk = generator.generate(sector)
-                self.model.feed_chunk(chunk)
+                sector_position = sectorize(self.position)
+                sector = generator.generate(sector_position)
+                self.model.register_sector(sector)
 
                 # Move the actor above the terrain
                 while not self.model.empty(self.position):
@@ -407,17 +399,6 @@ class GameScene(Scene):
         dt = min(dt, 0.2)
         for _ in range(m):
             self._update(dt / m)
-
-    def on_sector_received(self, chunk):
-        """Called when a part of the world is returned.
-
-        This is not executed by the main thread. So the result have to be passed
-        to the main thread.
-        """
-        self.received_sectors.append(chunk)
-        # Reduce the load of the main thread by delaying the
-        # computation between 2 chunks
-        time.sleep(0.05)
 
     def _update(self, dt):
         """ Private implementation of the `update()` method. This is where most

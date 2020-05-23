@@ -103,7 +103,7 @@ class Model(object):
         self.world = {}
 
         # Procedural generator
-        self.generator = None
+        self._generator = None
 
         # Same mapping as `world` but only contains blocks that are shown.
         self.shown = {}
@@ -126,6 +126,24 @@ class Model(object):
     @property
     def currently_shown(self):
         return len(self._shown)
+
+    @property
+    def generator(self):
+        return self._generator
+
+    @generator.setter
+    def generator(self, generator):
+        assert self._generator is None
+        generator.set_callback(self.on_sector_received)
+        self._generator = generator
+
+    def on_sector_received(self, chunk):
+        """Called when a part of the world is returned.
+
+        This is not executed by the main thread. So the result have to be passed
+        to the main thread.
+        """
+        self._enqueue(self.register_sector, chunk)
 
     def hit_test(self, position, vector, max_distance=NODE_SELECTOR):
         """ Line of sight search from current position. If a block is
@@ -293,11 +311,15 @@ class Model(object):
         if block:
             block.delete()
 
-    def feed_chunk(self, chunk):
-        """Add a chunk of the world to the model.
+    def register_sector(self, sector):
+        """Add a new sector to this world definition.
         """
-        shown = chunk.position in self.shown_sectors
-        for position, block in chunk.blocks.items():
+        # Assert if the sector is already there.
+        # It also could be skipped, or merged together.
+        assert sector.position not in self.sectors or len(self.sectors[sector.position]) == 0
+
+        shown = sector.position in self.shown_sectors
+        for position, block in sector.blocks.items():
             self.add_block(position, block, immediate=False)
             if shown:
                 self.show_block(position, immediate=False)
