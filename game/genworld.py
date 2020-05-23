@@ -38,56 +38,7 @@ from .blocks import *
 from .utilities import *
 from game import utilities
 from .noise import Noise
-
-
-class Chunk:
-    """A chunk of the world
-
-    It contains the block description of a sector. As it is initially generated.
-    """
-
-    def __init__(self, sector):
-        self.blocks = {}
-        """Location and kind of the blocks in this sector."""
-
-        self.sector = sector
-        """Location of this sector."""
-
-        self.min_block = [i * SECTOR_SIZE for i in sector]
-        """Minimum location (included) of block in this section."""
-
-        self.max_block = [(i + 1) * SECTOR_SIZE for i in sector]
-        """Maximum location (excluded) of block in this section."""
-
-    def contains(self, pos):
-        """True if the position `pos` is inside this sector."""
-        return (self.min_block[0] <= pos[0] < self.max_block[0]
-                and self.min_block[1] <= pos[1] < self.max_block[1]
-                and self.min_block[2] <= pos[2] < self.max_block[2])
-
-    def contains_y(self, y):
-        """True if the horizontal plan `y` is inside this sector."""
-        return self.min_block[1] <= y < self.max_block[1]
-
-    def contains_y_range(self, ymin, ymax):
-        """True if the horizontal plan between `ymin` and `ymax` is inside this
-        sector."""
-        return self.min_block[1] <= ymax and ymin <= self.max_block[1]
-
-    def empty(self, pos):
-        """Return false if there is no block at this position in this chunk"""
-        return pos not in self.blocks
-
-    def __setitem__(self, pos, value):
-        self.blocks[pos] = value
-
-    def __getitem__(self, pos):
-        return self.blocks[pos]
-
-    def add_block(self, pos, block):
-        """Add a block to this chunk only if the `pos` is part of this chunk."""
-        if self.contains(pos):
-            self.blocks[pos] = block
+from .world import Sector
 
 
 class WorldGenerator:
@@ -227,7 +178,7 @@ class WorldGenerator:
     def generate(self, sector):
         """Generate a specific sector of the world and place all the blocks"""
 
-        chunk = Chunk(sector)
+        chunk = Sector(sector)
         """Store the content of this sector"""
 
         if self.enclosure:
@@ -323,11 +274,11 @@ class WorldGenerator:
             block = terrains[-1]
             return block, y
 
-        sector = chunk.sector
+        sector_pos = chunk.position
         # Common root for many chunks
         # So what it is easier to generate trees between 2 chunks
-        sector_root_x = (sector[0] * SECTOR_SIZE // self.tree_chunk_size) * self.tree_chunk_size
-        sector_root_z = (sector[2] * SECTOR_SIZE // self.tree_chunk_size) * self.tree_chunk_size
+        sector_root_x = (sector_pos[0] * SECTOR_SIZE // self.tree_chunk_size) * self.tree_chunk_size
+        sector_root_z = (sector_pos[2] * SECTOR_SIZE // self.tree_chunk_size) * self.tree_chunk_size
         random.seed(sector_root_x + sector_root_z)
 
         nb_trees = random.randint(0, self.nb_trees)
