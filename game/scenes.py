@@ -718,13 +718,17 @@ class GameScene(Scene):
             if self.toggleLabel:
                 self.draw_label()
 
+    def get_focus_block(self):
+        vector = self.get_sight_vector()
+        block = self.model.hit_test(self.position, vector)[0]
+        return block
+
     def draw_focused_block(self):
         """ Draw black edges around the block that is currently under the
         crosshairs.
 
         """
-        vector = self.get_sight_vector()
-        block = self.model.hit_test(self.position, vector)[0]
+        block = self.get_focus_block()
         if block:
             x, y, z = block
             self.highlight.vertices[:] = cube_vertices(x, y, z, 0.51)
