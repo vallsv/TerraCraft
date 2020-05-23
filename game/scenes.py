@@ -225,7 +225,7 @@ class GameScene(Scene):
 
         # Current (x, y, z) position in the world, specified with floats. Note
         # that, perhaps unlike in math class, the y-axis is the vertical axis.
-        self.position = (SECTOR_SIZE // 2, 0, SECTOR_SIZE // 2)
+        self.position = (SECTOR_SIZE // 2, 6, SECTOR_SIZE // 2)
 
         # First element is rotation of the player in the x-z plane (ground
         # plane) measured from the z-axis down. The second is the rotation
@@ -393,6 +393,7 @@ class GameScene(Scene):
 
             if not has_save:
                 generator = WorldGenerator()
+                generator.y = self.position[1]
                 generator.hills_enabled = HILLS_ON
                 self.model.generator = generator
                 self.init_player_on_summit()
@@ -524,8 +525,7 @@ class GameScene(Scene):
             return
 
         sectors_to_show = []
-        visibility = 64
-        pad = visibility // SECTOR_SIZE
+        pad = int(FOG_END) // SECTOR_SIZE
         for dx in range(-pad, pad + 1):
             for dy in range(-pad, pad + 1):
                 for dz in range(-pad, pad + 1):
