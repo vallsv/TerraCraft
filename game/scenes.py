@@ -481,7 +481,7 @@ class GameScene(Scene):
                     op = list(np)
                     op[1] -= dy
                     op[i] += face[i]
-                    if tuple(op) not in self.model.world:
+                    if self.model.empty(tuple(op), must_be_loaded=True):
                         continue
                     p[i] -= (d - pad) * face[i]
                     if face == (0, -1, 0) or face == (0, 1, 0):
@@ -570,7 +570,7 @@ class GameScene(Scene):
                 if previous:
                     self.model.add_block(previous, self.block)
             elif button == pyglet.window.mouse.LEFT and block:
-                texture = self.model.world[block]
+                texture = self.model.get_block(block)
                 if texture != BEDSTONE:
                     self.model.remove_block(block)
                     self.audio.play(self.destroy_sfx)
@@ -688,6 +688,8 @@ class GameScene(Scene):
             self.running = False
         elif symbol == key.LSHIFT:
             self.dy = 0
+        elif symbol == key.P:
+            breakpoint()
 
     def on_resize(self, width, height):
         """Event handler for the Window.on_resize event.
@@ -741,9 +743,12 @@ class GameScene(Scene):
 
         """
         x, y, z = self.position
-        self.info_label.text = 'FPS = [%02d] : COORDS = [%.2f, %.2f, %.2f] : %d / %d' % (
-            pyglet.clock.get_fps(), x, y, z,
-            self.model.currently_shown, len(self.model.world))
+        elements = []
+        elements.append("FPS = [%02d]" % pyglet.clock.get_fps())
+        elements.append("COORDS = [%.2f, %.2f, %.2f]" % (x, y, z))
+        elements.append("BLOCKS = %d / %d" % (self.model.currently_shown, self.model.count_blocks()))
+        elements.append("SECTORS = %d [+%d]" % (len(self.model.sectors), len(self.model.requested)))
+        self.info_label.text = ' : '.join(elements)
         self.info_label.draw()
 
 

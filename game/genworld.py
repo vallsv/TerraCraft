@@ -56,14 +56,14 @@ class WorldGenerator:
         """If True the generator uses a procedural generation for the map.
         Else, a flat floor will be generated."""
 
-        self.y = 0
+        self.y = 4
         """Initial y height"""
 
         self.cloudiness = 0.35
         """The cloudiness can be custom to change the about of clouds generated.
         0 means blue sky, and 1 means white sky."""
 
-        self.y_cloud = 20
+        self.y_cloud = self.y + 20
         """y-position of the clouds."""
 
         self.nb_trees = 6

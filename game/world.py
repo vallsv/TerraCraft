@@ -39,11 +39,18 @@ from pyglet.gl import *
 
 from .blocks import *
 from .utilities import *
-from game.utilities import sectorize
+
+
+def iter_neighbors(position):
+    """Iterate all the positions neighboring this position"""
+    x, y, z = position
+    for dx, dy, dz in FACES:
+        neighbor = x + dx, y + dy, z + dz
+        yield neighbor
 
 
 class Sector:
-    """A chunk of the world
+    """A sector is a chunk of the world of the size SECTOR_SIZE in each directions.
 
     It contains the block description of a sector. As it is initially generated.
     """
@@ -51,6 +58,11 @@ class Sector:
     def __init__(self, position):
         self.blocks = {}
         """Location and kind of the blocks in this sector."""
+
+        self.visible = set({})
+        """Set of visible blocks if we look at this sector alone"""
+
+        self.face_full_cache = set({})
 
         self.position = position
         """Location of this sector."""
@@ -60,6 +72,12 @@ class Sector:
 
         self.max_block = [(i + 1) * SECTOR_SIZE for i in position]
         """Maximum location (excluded) of block in this section."""
+
+    def is_face_full(self, direction):
+        """Check if one of the face of this section is full of blocks.
+
+        The direction is a normalized vector from `FACES`."""
+        return direction in self.face_full_cache
 
     def contains(self, pos):
         """True if the position `pos` is inside this sector."""
@@ -80,16 +98,97 @@ class Sector:
         """Return false if there is no block at this position in this chunk"""
         return pos not in self.blocks
 
-    def __setitem__(self, pos, value):
-        self.blocks[pos] = value
+    def add_block(self, position, block):
+        """Add a block to this chunk only if the `position` is part of this chunk."""
+        if not self.contains(position):
+            return
 
-    def __getitem__(self, pos):
-        return self.blocks[pos]
+        self.blocks[position] = block
+        if self.exposed(position):
+            self.visible.add(position)
+        self.check_neighbors(position)
 
-    def add_block(self, pos, block):
-        """Add a block to this chunk only if the `pos` is part of this chunk."""
-        if self.contains(pos):
-            self.blocks[pos] = block
+        for axis in range(3):
+            if position[axis] == self.min_block[axis]:
+                face = [0] * 3
+                face[axis] = -1
+                face = tuple(face)
+                if self.check_face_full(face):
+                    self.face_full_cache.add(face)
+            elif position[axis] == self.max_block[axis] - 1:
+                face = [0] * 3
+                face[axis] = 1
+                face = tuple(face)
+                if self.check_face_full(face):
+                    self.face_full_cache.add(face)
+
+    def check_face_full(self, face):
+        axis = (face[1] != 0) * 1 + (face[2] != 0) * 2
+        if face[axis] == -1:
+            fixed_pos = self.min_block[axis]
+        else:
+            fixed_pos = self.max_block[axis] - 1
+        axis2 = (axis + 1) % 3
+        axis3 = (axis + 2) % 3
+
+        pos = [None] * 3
+        pos[axis] = fixed_pos
+        for a2 in range(self.min_block[axis2], self.max_block[axis2]):
+            for a3 in range(self.min_block[axis3], self.max_block[axis3]):
+                pos[axis2] = a2
+                pos[axis3] = a3
+                block_pos = tuple(pos)
+                if block_pos not in self.blocks:
+                    return False
+        return True
+
+    def remove_block(self, position):
+        """Remove a block from this sector at the `position`.
+
+        Returns discarded full faces in case.
+        """
+        del self.blocks[position]
+        self.check_neighbors(position)
+        self.visible.discard(position)
+
+        discarded = set({})
+        # Update the full faces
+        for face in list(self.face_full_cache):
+            axis = (face[1] != 0) * 1 + (face[2] != 0) * 2
+            if face[axis] == -1:
+                border = self.min_block
+            else:
+                x, y, z = self.max_block
+                border = x - 1, y - 1, z - 1
+            if position[axis] == border[axis]:
+                self.face_full_cache.discard(face)
+                discarded.add(face)
+        return discarded
+
+    def exposed(self, position):
+        """ Returns False if given `position` is surrounded on all 6 sides by
+        blocks, True otherwise.
+        """
+        for neighbor in iter_neighbors(position):
+            if self.empty(neighbor):
+                return True
+        return False
+
+    def check_neighbors(self, position):
+        """ Check all blocks surrounding `position` and ensure their visual
+        state is current. This means hiding blocks that are not exposed and
+        ensuring that all exposed blocks are shown. Usually used after a block
+        is added or removed.
+        """
+        for neighbor in iter_neighbors(position):
+            if self.empty(neighbor):
+                continue
+            if self.exposed(neighbor):
+                if neighbor not in self.visible:
+                    self.visible.add(neighbor)
+            else:
+                if neighbor in self.visible:
+                    self.visible.remove(neighbor)
 
 
 class Model(object):
@@ -97,10 +196,6 @@ class Model(object):
         self.batch = batch
 
         self.group = group
-
-        # A mapping from position to the texture of the block at that position.
-        # This defines all the blocks that are currently in the world.
-        self.world = {}
 
         # Procedural generator
         self._generator = None
@@ -111,14 +206,15 @@ class Model(object):
         # Mapping from position to a pyglet `VertextList` for all shown blocks.
         self._shown = {}
 
-        # Mapping from sector to a list of positions inside that sector.
+        # Mapping from sector index a list of positions inside that sector.
         self.sectors = {}
 
         # Actual set of shown sectors
         self.shown_sectors = set({})
 
-        #self.generate_world = generate_world(self) 
-        
+        # List of sectors requested but not yet received
+        self.requested = set({})
+
         # Simple function queue implementation. The queue is populated with
         # _show_block() and _hide_block() calls
         self.queue = deque()
@@ -126,6 +222,10 @@ class Model(object):
     @property
     def currently_shown(self):
         return len(self._shown)
+
+    def count_blocks(self):
+        """Return the number of blocks in this model"""
+        return sum([len(s.blocks) for s in self.sectors.values() if s is not None])
 
     @property
     def generator(self):
@@ -166,16 +266,22 @@ class Model(object):
         previous = None
         for _ in range(max_distance * m):
             checked_position = normalize((x, y, z))
-            if checked_position != previous and checked_position in self.world:
+            if checked_position != previous and not self.empty(checked_position):
                 return checked_position, previous
             previous = checked_position
             x, y, z = x + dx / m, y + dy / m, z + dz / m
         return None, None
 
-    def empty(self, position):
+    def empty(self, position, must_be_loaded=False):
         """ Returns True if given `position` does not contain block.
+
+        If `must_be_loaded` is True, this returns False if the block is not yet loaded.
         """
-        return not position in self.world
+        sector_pos = sectorize(position)
+        sector = self.sectors.get(sector_pos, None)
+        if sector is None:
+            return not must_be_loaded
+        return sector.empty(position)
 
     def exposed(self, position):
         """ Returns False if given `position` is surrounded on all 6 sides by
@@ -184,7 +290,8 @@ class Model(object):
         """
         x, y, z = position
         for dx, dy, dz in FACES:
-            if (x + dx, y + dy, z + dz) not in self.world:
+            pos = (x + dx, y + dy, z + dz)
+            if self.empty(pos, must_be_loaded=True):
                 return True
         return False
 
@@ -201,10 +308,17 @@ class Model(object):
             Whether or not to draw the block immediately.
 
         """
-        if position in self.world:
+        sector_pos = sectorize(position)
+        sector = self.sectors.get(sector_pos)
+        if sector is None:
+            # Sector not yet loaded
+            # It would be better to create it
+            # and then to merge it when the sector is loaded
+            return
+
+        if position in sector.blocks:
             self.remove_block(position, immediate)
-        self.world[position] = block
-        self.sectors.setdefault(sectorize(position), []).append(position)
+        sector.add_block(position, block)
         if immediate:
             if self.exposed(position):
                 self.show_block(position)
@@ -221,24 +335,59 @@ class Model(object):
             Whether or not to immediately remove block from canvas.
 
         """
-        del self.world[position]
-        self.sectors[sectorize(position)].remove(position)
+        sector_pos = sectorize(position)
+        sector = self.sectors.get(sector_pos)
+        if sector is None:
+            # Nothing to do
+            return
+
+        if position not in sector.blocks:
+            # Nothing to do
+            return
+
+
+        discarded = sector.remove_block(position)
+
+        # Removing a block can make a neighbor section visible
+        if discarded:
+            x, y, z = sector.position
+            for dx, dy, dz in discarded:
+                neighbor_pos = x + dx, y + dy, z + dz
+                if neighbor_pos in self.sectors:
+                    continue
+                if neighbor_pos in self.requested:
+                    continue
+                if neighbor_pos not in self.shown_sectors:
+                    continue
+                neighbor = self.generator.generate(neighbor_pos)
+                self.register_sector(neighbor)
+
         if immediate:
             if position in self.shown:
                 self.hide_block(position)
             self.check_neighbors(position)
+
+    def get_block(self, position):
+        """Return a block from this position.
+
+        If no blocks, None is returned.
+        """
+        sector_pos = sectorize(position)
+        sector = self.sectors.get(sector_pos)
+        if sector is None:
+            return None
+        return sector.blocks.get(position, None)
 
     def check_neighbors(self, position):
         """ Check all blocks surrounding `position` and ensure their visual
         state is current. This means hiding blocks that are not exposed and
         ensuring that all exposed blocks are shown. Usually used after a block
         is added or removed.
-
         """
         x, y, z = position
         for dx, dy, dz in FACES:
             neighbor = (x + dx, y + dy, z + dz)
-            if neighbor not in self.world:
+            if self.empty(neighbor):
                 continue
             if self.exposed(neighbor):
                 if neighbor not in self.shown:
@@ -259,7 +408,7 @@ class Model(object):
             Whether or not to show the block immediately.
 
         """
-        block = self.world[position]
+        block = self.get_block(position)
         self.shown[position] = block
         if immediate:
             self._show_block(position, block)
@@ -316,57 +465,113 @@ class Model(object):
         """
         # Assert if the sector is already there.
         # It also could be skipped, or merged together.
-        assert sector.position not in self.sectors or len(self.sectors[sector.position]) == 0
+        assert sector.position not in self.sectors
+        self.requested.discard(sector.position)
+        self.sectors[sector.position] = sector
+        if sector.position not in self.shown_sectors:
+            return
 
-        shown = sector.position in self.shown_sectors
-        for position, block in sector.blocks.items():
-            self.add_block(position, block, immediate=False)
-            if shown:
+        # Update the displayed blocks
+        for position in sector.visible:
+            if self.exposed(position):
                 self.show_block(position, immediate=False)
 
-    def show_sector(self, sector):
+        # Check neighbor block which was not displayed
+        for neighbor_pos in iter_neighbors(sector.position):
+            neighbor = self.sectors.get(neighbor_pos, None)
+            if neighbor:
+                for position in neighbor.visible:
+                    if position not in self.shown:
+                        if self.exposed(position):
+                            self.show_block(position, immediate=False)
+
+        # Is sector around have to be loaded too?
+        x, y, z = sector.position
+        for face in FACES:
+            # The sector have to be accessible
+            if sector.is_face_full(face):
+                continue
+            pos = x + face[0], y + face[1], z + face[2]
+            # Must not be already loaded
+            if pos in self.sectors:
+                continue
+            # Must be shown actually
+            if pos not in self.shown_sectors:
+                continue
+            # Must not be already requested
+            if pos in self.requested:
+                continue
+            # Then request the sector
+            if self.generator is not None:
+                self.requested.add(pos)
+                self.generator.request_sector(pos)
+
+    def show_sector(self, sector_pos):
         """ Ensure all blocks in the given sector that should be shown are
         drawn to the canvas.
-
         """
-        self.shown_sectors.add(sector)
-
-        if sector not in self.sectors:
+        self.shown_sectors.add(sector_pos)
+        if sector_pos not in self.sectors:
+            if sector_pos in self.requested:
+                # Already requested
+                return
+            # If sectors around not yet loaded
+            if not self.is_sector_visible(sector_pos):
+                return
             if self.generator is not None:
                 # This sector is about to be loaded
-                self.sectors[sector] = []
-                self.generator.request_sector(sector)
+                self.requested.add(sector_pos)
+                self.generator.request_sector(sector_pos)
                 return
 
-        for position in self.sectors.get(sector, []):
-            if position not in self.shown and self.exposed(position):
-                self.show_block(position, False)
+        sector = self.sectors.get(sector_pos, None)
+        if sector:
+            for position in sector.visible:
+                if position not in self.shown and self.exposed(position):
+                    self.show_block(position, False)
 
-    def hide_sector(self, sector):
+    def is_sector_visible(self, sector_pos):
+        """Check if a sector is visible.
+
+        For now only check if no from a sector position.
+        """
+        x, y, z = sector_pos
+        for dx, dy, dz in FACES:
+            pos = (x + dx, y + dy, z + dz)
+            neighbor = self.sectors.get(pos, None)
+            if neighbor is not None:
+                neighbor_face = (-dx, -dy, -dz)
+                if not neighbor.is_face_full(neighbor_face):
+                    return True
+        return False
+
+    def hide_sector(self, sector_pos):
         """ Ensure all blocks in the given sector that should be hidden are
         removed from the canvas.
 
         """
-        self.shown_sectors.discard(sector)
+        self.shown_sectors.discard(sector_pos)
 
-        for position in self.sectors.get(sector, []):
-            if position in self.shown:
-                self.hide_block(position, False)
+        sector = self.sectors.get(sector_pos, None)
+        if sector:
+            for position in sector.blocks.keys():
+                if position in self.shown:
+                    self.hide_block(position, False)
 
-    def show_only_sectors(self, sectors):
+    def show_only_sectors(self, sector_positions):
         """ Update the shown sectors.
 
         Show the ones which are not part of the list, and hide the others.
         """
-        after_set = set(sectors)
+        after_set = set(sector_positions)
         before_set = self.shown_sectors
         hide = before_set - after_set
         # Use a list to respect the order of the sectors
-        show = [s for s in sectors if s not in before_set]
-        for sector in show:
-            self.show_sector(sector)
-        for sector in hide:
-            self.hide_sector(sector)
+        show = [s for s in sector_positions if s not in before_set]
+        for sector_pos in show:
+            self.show_sector(sector_pos)
+        for sector_pos in hide:
+            self.hide_sector(sector_pos)
 
     def _enqueue(self, func, *args):
         """ Add `func` to the internal queue.
