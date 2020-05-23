@@ -44,9 +44,10 @@ from .utilities import *
 def iter_neighbors(position):
     """Iterate all the positions neighboring this position"""
     x, y, z = position
-    for dx, dy, dz in FACES:
+    for face in FACES:
+        dx, dy, dz = face
         neighbor = x + dx, y + dy, z + dz
-        yield neighbor
+        yield neighbor, face
 
 
 class Sector:
@@ -61,6 +62,9 @@ class Sector:
 
         self.visible = set({})
         """Set of visible blocks if we look at this sector alone"""
+
+        self.outline = set({})
+        """Blocks on the outline of the section"""
 
         self.face_full_cache = set({})
 
@@ -94,6 +98,17 @@ class Sector:
         sector."""
         return self.min_block[1] <= ymax and ymin <= self.max_block[1]
 
+    def blocks_from_face(self, face):
+        """Iterate all blocks from a face"""
+        axis = 0 if face[0] != 0 else (1 if face[1] != 0 else 2)
+        if face[axis] == -1:
+            pos = self.min_block[axis]
+        else:
+            pos = self.max_block[axis] - 1
+        for block in self.outline:
+            if block[axis] == pos:
+                yield block
+
     def empty(self, pos):
         """Return false if there is no block at this position in this chunk"""
         return pos not in self.blocks
@@ -110,12 +125,14 @@ class Sector:
 
         for axis in range(3):
             if position[axis] == self.min_block[axis]:
+                self.outline.add(position)
                 face = [0] * 3
                 face[axis] = -1
                 face = tuple(face)
                 if self.check_face_full(face):
                     self.face_full_cache.add(face)
             elif position[axis] == self.max_block[axis] - 1:
+                self.outline.add(position)
                 face = [0] * 3
                 face[axis] = 1
                 face = tuple(face)
@@ -150,6 +167,7 @@ class Sector:
         del self.blocks[position]
         self.check_neighbors(position)
         self.visible.discard(position)
+        self.outline.discard(position)
 
         discarded = set({})
         # Update the full faces
@@ -169,7 +187,7 @@ class Sector:
         """ Returns False if given `position` is surrounded on all 6 sides by
         blocks, True otherwise.
         """
-        for neighbor in iter_neighbors(position):
+        for neighbor, _face in iter_neighbors(position):
             if self.empty(neighbor):
                 return True
         return False
@@ -180,7 +198,7 @@ class Sector:
         ensuring that all exposed blocks are shown. Usually used after a block
         is added or removed.
         """
-        for neighbor in iter_neighbors(position):
+        for neighbor, _face in iter_neighbors(position):
             if self.empty(neighbor):
                 continue
             if self.exposed(neighbor):
@@ -471,19 +489,29 @@ class Model(object):
         if sector.position not in self.shown_sectors:
             return
 
+        to_show = set([])
+
         # Update the displayed blocks
         for position in sector.visible:
-            if self.exposed(position):
-                self.show_block(position, immediate=False)
+            if position not in sector.outline or self.exposed(position):
+                to_show.add(position)
 
         # Check neighbor block which was not displayed
-        for neighbor_pos in iter_neighbors(sector.position):
+        for neighbor_pos, face in iter_neighbors(sector.position):
+            if sector.is_face_full(face):
+                continue
             neighbor = self.sectors.get(neighbor_pos, None)
             if neighbor:
-                for position in neighbor.visible:
+                opposite = -face[0], -face[1], -face[2]
+                for position in neighbor.blocks_from_face(opposite):
                     if position not in self.shown:
-                        if self.exposed(position):
-                            self.show_block(position, immediate=False)
+                        x, y, z = position
+                        check = x - face[0], y - face[1], z - face[2]
+                        if sector.empty(check):
+                            to_show.add(position)
+
+        for position in to_show:
+            self.show_block(position, immediate=False)
 
         # Is sector around have to be loaded too?
         x, y, z = sector.position
@@ -527,8 +555,12 @@ class Model(object):
         sector = self.sectors.get(sector_pos, None)
         if sector:
             for position in sector.visible:
-                if position not in self.shown and self.exposed(position):
-                    self.show_block(position, False)
+                if position not in self.shown:
+                    if position in sector.outline:
+                        if self.exposed(position):
+                            self.show_block(position, False)
+                    else:
+                        self.show_block(position, False)
 
     def is_sector_visible(self, sector_pos):
         """Check if a sector is visible.
