@@ -439,8 +439,7 @@ class GameScene(Scene):
         # collisions
         x, y, z = self.position
         x, y, z = self.collide((x + dx, y + dy, z + dz), PLAYER_HEIGHT)
-        # fix bug for jumping outside the wall and falling to infinity.
-        y = max(-1.25, y)
+
         position = (x, y, z)
         if self.position != position:
             self.position = position
@@ -490,6 +489,25 @@ class GameScene(Scene):
                         # falling / rising.
                         self.dy = 0
                     break
+
+        generator = self.model.generator
+        if generator is None:
+            # colliding with the virtual floor
+            # to avoid to fall infinitely.
+            p[1] = max(-1.25, p[1])
+        else:
+            if generator.enclosure:
+                # Force the player inside the enclosure
+                s = generator.enclosure_size
+                if p[0] < -s:
+                    p[0] = -s
+                elif p[0] > s:
+                    p[0] = s
+                if p[2] < -s:
+                    p[2] = -s
+                elif p[2] > s:
+                    p[2] = s
+
         return tuple(p)
 
     def update_shown_sectors(self, position, rotation):
