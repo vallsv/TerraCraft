@@ -514,7 +514,8 @@ class GameScene(Scene):
             return
 
         sectors_to_show = []
-        pad = 5
+        visibility = 16 * 5
+        pad = visibility // SECTOR_SIZE
         for dx in range(-pad, pad + 1):
             for dy in range(-pad, pad + 1):
                 for dz in range(-pad, pad + 1):

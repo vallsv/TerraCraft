@@ -117,8 +117,11 @@ class WorldGenerator:
         self.y_cloud = 20
         """y-position of the clouds."""
 
-        self.nb_trees = 3
+        self.nb_trees = 6
         """Max number of trees to generate per sectors"""
+
+        self.tree_chunk_size = 32
+        """The number of tree will be generated in this chunk size (in block)"""
 
         self.enclosure = True
         """If true the world is limited to a fixed size, else the world is infinitely
@@ -310,7 +313,7 @@ class WorldGenerator:
         For now it do not generate trees between 2 sectors, and use rand
         instead of a procedural generation.
         """
-        if not chunk.contains_y_range(0, 15):
+        if not chunk.contains_y_range(self.y, self.y + 20):
             return
 
         def get_biome(x, y, z):
@@ -321,14 +324,19 @@ class WorldGenerator:
             return block, y
 
         sector = chunk.sector
-        random.seed(sector[0] + sector[2])
+        # Common root for many chunks
+        # So what it is easier to generate trees between 2 chunks
+        sector_root_x = (sector[0] * SECTOR_SIZE // self.tree_chunk_size) * self.tree_chunk_size
+        sector_root_z = (sector[2] * SECTOR_SIZE // self.tree_chunk_size) * self.tree_chunk_size
+        random.seed(sector_root_x + sector_root_z)
+
         nb_trees = random.randint(0, self.nb_trees)
         n = self.enclosure_size - 3
         y_pos = self.y - 2
 
         for _ in range(nb_trees):
-            x = sector[0] * utilities.SECTOR_SIZE + 3 + random.randint(0, utilities.SECTOR_SIZE - 7)
-            z = sector[2] * utilities.SECTOR_SIZE + 3 + random.randint(0, utilities.SECTOR_SIZE - 7)
+            x = sector_root_x + 3 + random.randint(0, self.tree_chunk_size - 7)
+            z = sector_root_z + 3 + random.randint(0, self.tree_chunk_size - 7)
             if self.enclosure:
                 if x < -n + 2 or x > n - 2 or z < -n + 2 or z > n - 2:
                     continue
@@ -339,7 +347,7 @@ class WorldGenerator:
             if biome == SAND:
                 height = random.randint(4, 5)
                 self._create_coconut_tree(chunk, x, start_pos, z, height)
-            elif start_pos > 6:
+            elif start_pos - self.y > 6:
                 height = random.randint(3, 5)
                 self._create_fir_tree(chunk, x, start_pos, z, height)
             else:
@@ -439,7 +447,7 @@ class WorldGenerator:
                 continue
             c = self.cloud_gen.noise2(x, z)
             if (c + 1) * 0.5 < self.cloudiness:
-                chunk[pos] = CLOUD
+                chunk.add_block(pos, CLOUD)
 
     def _get_stone(self, pos):
         """Returns the expected mineral at a specific location.
@@ -465,4 +473,4 @@ class WorldGenerator:
                 continue
             pos = x, y, z
             block = self._get_stone(pos)
-            chunk[pos] = block
+            chunk.add_block(pos, block)
